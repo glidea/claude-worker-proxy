@@ -1,6 +1,7 @@
 import * as provider from './provider'
 import * as gemini from './gemini'
 import * as openai from './openai'
+import { resolveModel } from './alias'
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -18,7 +19,10 @@ async function handle(request: Request): Promise<Response> {
         return new Response('Method not allowed', { status: 405 })
     }
 
-    const { typeParam, baseUrl, err: pathErr } = parsePath(new URL(request.url))
+    const requestUrl = new URL(request.url)
+    const isDev = requestUrl.hostname === 'localhost' || requestUrl.hostname === '127.0.0.1'
+
+    const { typeParam, baseUrl, err: pathErr } = parsePath(requestUrl)
     if (pathErr) {
         return pathErr
     }
@@ -44,8 +48,31 @@ async function handle(request: Request): Promise<Response> {
             return new Response('Unsupported type', { status: 400 })
     }
 
+    let modifiedRequest = request;
+    try {
+        const clonedRequest = request.clone();
+        const bodyText = await clonedRequest.text();
+        if (bodyText) {
+            const bodyJson = JSON.parse(bodyText);
+            if (bodyJson.model) {
+                bodyJson.model = resolveModel(bodyJson.model, isDev);
+                modifiedRequest = new Request(request, {
+                    body: JSON.stringify(bodyJson),
+                    headers: mutatedHeaders
+                });
+            } else {
+                modifiedRequest = new Request(request, { headers: mutatedHeaders });
+            }
+        } else {
+            modifiedRequest = new Request(request, { headers: mutatedHeaders });
+        }
+    } catch (e) {
+        // If JSON parsing fails, just forward the original request with mutated headers
+        modifiedRequest = new Request(request, { headers: mutatedHeaders });
+    }
+
     const providerRequest = await provider.convertToProviderRequest(
-        new Request(request, { headers: mutatedHeaders }),
+        modifiedRequest,
         baseUrl,
         apiKey
     )
