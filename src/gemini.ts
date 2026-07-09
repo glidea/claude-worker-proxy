@@ -39,10 +39,15 @@ export class impl implements provider.Provider {
     private convertToGeminiRequestBody(claudeRequest: types.ClaudeRequest): types.GeminiRequest {
         const toolUseMap = this.buildToolUseMap(claudeRequest.messages)
         const contents = this.convertMessages(claudeRequest.messages, toolUseMap)
+        const systemInstruction = this.convertSystemInstruction(claudeRequest.system)
 
         const geminiRequest: types.GeminiRequest = {
             model: claudeRequest.model,
             contents
+        }
+
+        if (systemInstruction) {
+            geminiRequest.systemInstruction = systemInstruction
         }
 
         if (claudeRequest.tools && claudeRequest.tools.length > 0) {
@@ -68,6 +73,22 @@ export class impl implements provider.Provider {
         }
 
         return geminiRequest
+    }
+
+    private convertSystemInstruction(system: types.ClaudeRequest['system']): types.GeminiContent | undefined {
+        if (!system) return undefined
+        const text =
+            typeof system === 'string'
+                ? system
+                : system
+                      .filter(part => part.type === 'text')
+                      .map(part => part.text)
+                      .join('\n')
+
+        if (!text) return undefined
+        return {
+            parts: [{ text }]
+        }
     }
 
     private buildToolUseMap(messages: types.ClaudeMessage[]): Map<string, string> {
@@ -203,6 +224,8 @@ export class impl implements provider.Provider {
     }
 
     private async convertStreamResponse(geminiResponse: Response): Promise<Response> {
+        let textBlockOpen = false
+
         return utils.processProviderStream(geminiResponse, (jsonStr, textBlockIndex, toolUseBlockIndex) => {
             const geminiData = JSON.parse(jsonStr) as types.GeminiResponse
             if (!geminiData.candidates || geminiData.candidates.length === 0) {
@@ -213,23 +236,47 @@ export class impl implements provider.Provider {
             const events: string[] = []
             let currentTextIndex = textBlockIndex
             let currentToolIndex = toolUseBlockIndex
+            let stopReason: types.ClaudeStopReason | undefined
 
             if (candidate.content) {
                 for (const part of candidate.content.parts) {
                     if ('text' in part && part.text) {
-                        events.push(...utils.processTextPart(part.text, currentTextIndex))
-                        currentTextIndex++
+                        if (!textBlockOpen) {
+                            events.push(utils.startTextBlock(currentTextIndex))
+                            textBlockOpen = true
+                        }
+                        events.push(utils.textDelta(part.text, currentTextIndex))
                     } else if ('functionCall' in part) {
-                        events.push(...utils.processToolUsePart(part.functionCall, currentToolIndex))
+                        if (textBlockOpen) {
+                            events.push(utils.stopContentBlock(currentTextIndex))
+                            currentTextIndex++
+                            textBlockOpen = false
+                        }
+                        events.push(
+                            ...utils.processToolUsePart(
+                                { name: part.functionCall.name, args: part.functionCall.args ?? {} },
+                                currentToolIndex
+                            )
+                        )
                         currentToolIndex++
                     }
                 }
             }
 
+            if (candidate.finishReason) {
+                if (textBlockOpen) {
+                    events.push(utils.stopContentBlock(currentTextIndex))
+                    currentTextIndex++
+                    textBlockOpen = false
+                }
+                stopReason = candidate.finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'end_turn'
+            }
+
             return {
                 events,
                 textBlockIndex: currentTextIndex,
-                toolUseBlockIndex: currentToolIndex
+                toolUseBlockIndex: currentToolIndex,
+                stopReason
             }
         })
     }

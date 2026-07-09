@@ -1,9 +1,13 @@
 export interface JsonSchema {
-    type?: 'object' | 'string' | 'number' | 'boolean' | 'array'
+    type?: 'object' | 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'null'
     properties?: { [key: string]: JsonSchema }
     required?: string[]
     description?: string
     items?: JsonSchema
+    enum?: Array<string | number | boolean | null>
+    anyOf?: JsonSchema[]
+    oneOf?: JsonSchema[]
+    additionalProperties?: boolean | JsonSchema
 }
 
 export interface ClaudeTool {
@@ -28,6 +32,7 @@ export interface ClaudeMessage {
 export interface ClaudeRequest {
     model: string
     messages: ClaudeMessage[]
+    system?: string | Array<{ type: 'text'; text: string }>
     max_tokens?: number
     temperature?: number
     stream?: boolean
@@ -39,12 +44,14 @@ export interface ClaudeResponse {
     type: 'message'
     role: 'assistant'
     content: Array<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: any }>
-    stop_reason?: 'end_turn' | 'tool_use' | 'max_tokens'
+    stop_reason?: ClaudeStopReason
     usage?: {
         input_tokens: number
         output_tokens: number
     }
 }
+
+export type ClaudeStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence'
 
 export interface GeminiFunctionDeclaration {
     name: string
@@ -69,6 +76,7 @@ export interface GeminiContent {
 export interface GeminiRequest {
     model?: string
     contents: GeminiContent[]
+    systemInstruction?: GeminiContent
     tools?: GeminiTool[]
     generationConfig?: {
         temperature?: number
@@ -153,6 +161,64 @@ export interface OpenAIRequest {
     temperature?: number
     max_tokens?: number
     stream?: boolean
+}
+
+export interface OpenAIResponsesRequest {
+    model: string
+    input: OpenAIResponsesInputItem[]
+    instructions?: string
+    tools?: OpenAIResponsesTool[]
+    temperature?: number
+    max_output_tokens?: number
+    stream?: boolean
+}
+
+export type OpenAIResponsesInputItem =
+    | {
+          type: 'message'
+          role: 'user' | 'assistant' | 'system'
+          content: Array<{ type: 'input_text'; text: string } | { type: 'output_text'; text: string }>
+      }
+    | {
+          type: 'function_call'
+          call_id: string
+          name: string
+          arguments: string
+      }
+    | {
+          type: 'function_call_output'
+          call_id: string
+          output: string
+      }
+
+export interface OpenAIResponsesTool {
+    type: 'function'
+    name: string
+    description?: string
+    parameters?: any
+}
+
+export interface OpenAIResponsesResponse {
+    id: string
+    output?: Array<
+        | {
+              type: 'message'
+              content?: Array<{ type: 'output_text'; text: string } | { type: string; [key: string]: any }>
+          }
+        | {
+              type: 'function_call'
+              call_id: string
+              name: string
+              arguments: string
+          }
+        | { type: string; [key: string]: any }
+    >
+    output_text?: string
+    status?: string
+    usage?: {
+        input_tokens?: number
+        output_tokens?: number
+    }
 }
 
 export interface OpenAIChoice {

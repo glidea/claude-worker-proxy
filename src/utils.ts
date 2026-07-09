@@ -1,9 +1,31 @@
 export function generateId(): string {
-    return Math.random().toString(36).substring(2)
+    return crypto.randomUUID()
+}
+
+const encoder = new TextEncoder()
+
+export function safeJsonParse(value: string): any {
+    try {
+        return JSON.parse(value)
+    } catch {
+        return {}
+    }
+}
+
+export function sse(event: string, data: unknown): string {
+    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+}
+
+export function enqueueSse(controller: ReadableStreamDefaultController, event: string, data: unknown): void {
+    controller.enqueue(encoder.encode(sse(event, data)))
+}
+
+export function enqueueRawSse(controller: ReadableStreamDefaultController, event: string): void {
+    controller.enqueue(encoder.encode(event))
 }
 
 export function sendMessageStart(controller: ReadableStreamDefaultController): void {
-    const event = `event: message_start\ndata: ${JSON.stringify({
+    const event = sse('message_start', {
         type: 'message_start',
         message: {
             id: generateId(),
@@ -11,48 +33,62 @@ export function sendMessageStart(controller: ReadableStreamDefaultController): v
             role: 'assistant',
             content: []
         }
-    })}\n\n`
-    controller.enqueue(new TextEncoder().encode(event))
+    })
+    controller.enqueue(encoder.encode(event))
+}
+
+export function sendMessageDelta(controller: ReadableStreamDefaultController, stopReason: string): void {
+    enqueueSse(controller, 'message_delta', {
+        type: 'message_delta',
+        delta: {
+            stop_reason: stopReason,
+            stop_sequence: null
+        }
+    })
 }
 
 export function sendMessageStop(controller: ReadableStreamDefaultController): void {
-    const event = `event: message_stop\ndata: ${JSON.stringify({
+    const event = sse('message_stop', {
         type: 'message_stop'
-    })}\n\n`
-    controller.enqueue(new TextEncoder().encode(event))
+    })
+    controller.enqueue(encoder.encode(event))
+}
+
+export function startTextBlock(index: number): string {
+    return sse('content_block_start', {
+        type: 'content_block_start',
+        index,
+        content_block: {
+            type: 'text',
+            text: ''
+        }
+    })
+}
+
+export function textDelta(text: string, index: number): string {
+    return sse('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: {
+            type: 'text_delta',
+            text
+        }
+    })
+}
+
+export function stopContentBlock(index: number): string {
+    return sse('content_block_stop', {
+        type: 'content_block_stop',
+        index
+    })
 }
 
 export function processTextPart(text: string, index: number): string[] {
     const events: string[] = []
 
-    events.push(
-        `event: content_block_start\ndata: ${JSON.stringify({
-            type: 'content_block_start',
-            index,
-            content_block: {
-                type: 'text',
-                text: ''
-            }
-        })}\n\n`
-    )
-
-    events.push(
-        `event: content_block_delta\ndata: ${JSON.stringify({
-            type: 'content_block_delta',
-            index,
-            delta: {
-                type: 'text_delta',
-                text
-            }
-        })}\n\n`
-    )
-
-    events.push(
-        `event: content_block_stop\ndata: ${JSON.stringify({
-            type: 'content_block_stop',
-            index
-        })}\n\n`
-    )
+    events.push(startTextBlock(index))
+    events.push(textDelta(text, index))
+    events.push(stopContentBlock(index))
 
     return events
 }
@@ -62,7 +98,7 @@ export function processToolUsePart(functionCall: { name: string; args: any }, in
     const toolUseId = generateId()
 
     events.push(
-        `event: content_block_start\ndata: ${JSON.stringify({
+        sse('content_block_start', {
             type: 'content_block_start',
             index,
             content_block: {
@@ -71,26 +107,21 @@ export function processToolUsePart(functionCall: { name: string; args: any }, in
                 name: functionCall.name,
                 input: {}
             }
-        })}\n\n`
+        })
     )
 
     events.push(
-        `event: content_block_delta\ndata: ${JSON.stringify({
+        sse('content_block_delta', {
             type: 'content_block_delta',
             index,
             delta: {
                 type: 'input_json_delta',
                 partial_json: JSON.stringify(functionCall.args)
             }
-        })}\n\n`
+        })
     )
 
-    events.push(
-        `event: content_block_stop\ndata: ${JSON.stringify({
-            type: 'content_block_stop',
-            index
-        })}\n\n`
-    )
+    events.push(stopContentBlock(index))
 
     return events
 }
@@ -109,7 +140,7 @@ export async function processProviderStream(
         jsonStr: string,
         textIndex: number,
         toolIndex: number
-    ) => { events: string[]; textBlockIndex: number; toolUseBlockIndex: number } | null
+    ) => { events: string[]; textBlockIndex: number; toolUseBlockIndex: number; stopReason?: string } | null
 ): Promise<Response> {
     const stream = new ReadableStream({
         async start(controller) {
@@ -123,6 +154,7 @@ export async function processProviderStream(
             let buffer = ''
             let textBlockIndex = 0
             let toolUseBlockIndex = 0
+            let stopReason = 'end_turn'
 
             sendMessageStart(controller)
 
@@ -146,23 +178,26 @@ export async function processProviderStream(
                         if (result) {
                             textBlockIndex = result.textBlockIndex
                             toolUseBlockIndex = result.toolUseBlockIndex
+                            stopReason = result.stopReason ?? stopReason
 
                             for (const event of result.events) {
-                                controller.enqueue(new TextEncoder().encode(event))
+                                controller.enqueue(encoder.encode(event))
                             }
                         }
                     }
                 }
             } finally {
-                if (buffer.trim()) {
+                if (buffer.trim() && buffer.startsWith('data: ')) {
                     const result = processLine(buffer.slice(6), textBlockIndex, toolUseBlockIndex)
                     if (result) {
+                        stopReason = result.stopReason ?? stopReason
                         for (const event of result.events) {
-                            controller.enqueue(new TextEncoder().encode(event))
+                            controller.enqueue(encoder.encode(event))
                         }
                     }
                 }
                 reader.releaseLock()
+                sendMessageDelta(controller, stopReason)
                 sendMessageStop(controller)
                 controller.close()
             }

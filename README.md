@@ -1,5 +1,4 @@
 ---
-
 <img width="400" height="200" alt="33f1d0d49cce103272da3821f66a2820" src="https://github.com/user-attachments/assets/fd909546-1544-4b7d-a7c1-67244d729e4f" />
 
 本项目由 [code0.ai](https://code0.ai?source=claudeworkerproxy) 赞助 —— 一站接入 gpt-image / Gemini / Claude 等主流 AI 模型，稳定不掉线，按量计费即充即用，专为 AI 创作者打造。注册后联系客服可免费领取测试额度，支持企业对接及开票。
@@ -7,7 +6,6 @@
 <img width="400" height="200" alt="4ca65f573c3d7b3dec0cd829d86262f6" src="https://github.com/user-attachments/assets/9fcffadc-2b95-411d-b778-bf33809f7ef7" />
 
 感谢 [Claude API](https://www.claudeapi.com?source=claudeworkerproxy) 赞助本项目！Claude API 是专注 Claude 模型的官方渠道 API 服务商，基于 Anthropic 官方 Key 与 AWS Bedrock 官方渠道，提供稳定的 Claude Code 与 Agent 应用接入体验，支持 Claude 全系列模型，保留 Tool Use、长上下文等官方能力。服务非逆向、非降智，适合 Claude Code 深度用户、Agent 工程师与企业技术团队使用。通过[专属链接](https://www.claudeapi.com?source=claudeworkerproxy)注册后联系客服，可领取免费测试额度，并支持开票和团队对接。
-
 ---
 
 把各家（Gemini，OpenAI）的模型 API 转换成 Claude 格式提供服务
@@ -48,9 +46,39 @@ curl -X POST https://claude-worker-proxy.xxxx.workers.dev/gemini/https://generat
 ### 参数说明
 
 - URL 格式：`{worker_url}/{type}/{provider_url_with_version}/v1/messages`
-- `type`: 目标厂商类型，目前支持 `gemini`, `openai`
+- `type`: 目标厂商类型，目前支持 `gemini`, `openai`, `openai-responses`
 - `provider_url_with_version`: 目标厂商 API 基础地址
 - `x-api-key`: 目标厂商的 API Key
+
+OpenAI Chat Completions 示例：
+
+```bash
+curl -X POST https://claude.llmapp.org/openai/https://api.openai.com/v1/v1/messages \
+  -H "x-api-key: YOUR_OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4.1-mini",
+    "max_tokens": 128,
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+OpenAI Responses API 示例：
+
+```bash
+curl -X POST https://claude.llmapp.org/openai-responses/https://api.openai.com/v1/v1/messages \
+  -H "x-api-key: YOUR_OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4.1-mini",
+    "max_tokens": 128,
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
 
 ### 在 Claude Code 中使用
 
@@ -68,7 +96,6 @@ curl -X POST https://claude-worker-proxy.xxxx.workers.dev/gemini/https://generat
 
 claude
 ```
-
 
 ---
 
