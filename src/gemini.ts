@@ -175,7 +175,11 @@ export class impl implements provider.Provider {
             id: utils.generateId(),
             type: 'message',
             role: 'assistant',
-            content: []
+            content: [],
+            usage: {
+                input_tokens: 0,
+                output_tokens: 0
+            }
         }
 
         if (geminiData.candidates && geminiData.candidates.length > 0) {

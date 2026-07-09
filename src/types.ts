@@ -45,7 +45,7 @@ export interface ClaudeResponse {
     role: 'assistant'
     content: Array<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: any }>
     stop_reason?: ClaudeStopReason
-    usage?: {
+    usage: {
         input_tokens: number
         output_tokens: number
     }

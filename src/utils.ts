@@ -24,26 +24,35 @@ export function enqueueRawSse(controller: ReadableStreamDefaultController, event
     controller.enqueue(encoder.encode(event))
 }
 
-export function sendMessageStart(controller: ReadableStreamDefaultController): void {
+export function sendMessageStart(
+    controller: ReadableStreamDefaultController,
+    usage: { input_tokens: number; output_tokens: number } = { input_tokens: 0, output_tokens: 0 }
+): void {
     const event = sse('message_start', {
         type: 'message_start',
         message: {
             id: generateId(),
             type: 'message',
             role: 'assistant',
-            content: []
+            content: [],
+            usage
         }
     })
     controller.enqueue(encoder.encode(event))
 }
 
-export function sendMessageDelta(controller: ReadableStreamDefaultController, stopReason: string): void {
+export function sendMessageDelta(
+    controller: ReadableStreamDefaultController,
+    stopReason: string,
+    usage: { input_tokens: number; output_tokens: number } = { input_tokens: 0, output_tokens: 0 }
+): void {
     enqueueSse(controller, 'message_delta', {
         type: 'message_delta',
         delta: {
             stop_reason: stopReason,
             stop_sequence: null
-        }
+        },
+        usage
     })
 }
 

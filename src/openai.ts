@@ -24,6 +24,10 @@ type ClaudeStreamState = {
     textBlockIndex: number
     toolUseBlockIndex: number
     stopReason: types.ClaudeStopReason
+    usage: {
+        input_tokens: number
+        output_tokens: number
+    }
 }
 
 function createClient(apiKey: string, baseUrl: string): OpenAI {
@@ -83,7 +87,11 @@ function initStreamState(): ClaudeStreamState {
         textBlockOpen: false,
         textBlockIndex: 0,
         toolUseBlockIndex: 0,
-        stopReason: 'end_turn'
+        stopReason: 'end_turn',
+        usage: {
+            input_tokens: 0,
+            output_tokens: 0
+        }
     }
 }
 
@@ -126,7 +134,10 @@ export class ChatCompletionsProvider implements provider.Provider {
             if (claudeRequest.stream) {
                 const stream = await client.chat.completions.create({
                     ...openaiRequest,
-                    stream: true
+                    stream: true,
+                    stream_options: {
+                        include_usage: true
+                    }
                 } as ChatCompletionCreateParams)
                 return this.convertStreamResponse(stream as Stream<ChatCompletionChunk>)
             }
@@ -264,7 +275,11 @@ export class ChatCompletionsProvider implements provider.Provider {
             id: openaiData.id || utils.generateId(),
             type: 'message',
             role: 'assistant',
-            content: []
+            content: [],
+            usage: {
+                input_tokens: 0,
+                output_tokens: 0
+            }
         }
 
         if (openaiData.choices && openaiData.choices.length > 0) {
@@ -313,6 +328,13 @@ export class ChatCompletionsProvider implements provider.Provider {
 
                 try {
                     for await (const chunk of openaiStream) {
+                        if (chunk.usage) {
+                            state.usage = {
+                                input_tokens: chunk.usage.prompt_tokens,
+                                output_tokens: chunk.usage.completion_tokens
+                            }
+                        }
+
                         if (!chunk.choices || chunk.choices.length === 0) continue
 
                         const choice = chunk.choices[0]
@@ -365,7 +387,7 @@ export class ChatCompletionsProvider implements provider.Provider {
                     const events: string[] = []
                     closeTextBlockIfNeeded(events, state)
                     enqueueEvents(controller, events)
-                    utils.sendMessageDelta(controller, state.stopReason)
+                    utils.sendMessageDelta(controller, state.stopReason, state.usage)
                     utils.sendMessageStop(controller)
                     controller.close()
                 }
@@ -518,7 +540,11 @@ export class ResponsesProvider implements provider.Provider {
             type: 'message',
             role: 'assistant',
             content: [],
-            stop_reason: 'end_turn'
+            stop_reason: 'end_turn',
+            usage: {
+                input_tokens: 0,
+                output_tokens: 0
+            }
         }
 
         for (const output of openaiData.output ?? []) {
@@ -618,10 +644,22 @@ export class ResponsesProvider implements provider.Provider {
                             case 'response.completed':
                                 closeTextBlockIfNeeded(events, state)
                                 state.stopReason = stopReasonFromResponseStatus(event.response.status)
+                                if (event.response.usage) {
+                                    state.usage = {
+                                        input_tokens: event.response.usage.input_tokens ?? 0,
+                                        output_tokens: event.response.usage.output_tokens ?? 0
+                                    }
+                                }
                                 break
                             case 'response.incomplete':
                                 closeTextBlockIfNeeded(events, state)
                                 state.stopReason = 'max_tokens'
+                                if (event.response.usage) {
+                                    state.usage = {
+                                        input_tokens: event.response.usage.input_tokens ?? 0,
+                                        output_tokens: event.response.usage.output_tokens ?? 0
+                                    }
+                                }
                                 break
                         }
 
@@ -635,7 +673,7 @@ export class ResponsesProvider implements provider.Provider {
                     const events: string[] = []
                     closeTextBlockIfNeeded(events, state)
                     enqueueEvents(controller, events)
-                    utils.sendMessageDelta(controller, state.stopReason)
+                    utils.sendMessageDelta(controller, state.stopReason, state.usage)
                     utils.sendMessageStop(controller)
                     controller.close()
                 }
